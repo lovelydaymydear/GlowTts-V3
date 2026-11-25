@@ -11,6 +11,7 @@ import com.exemplo.edgetts.native.EdgeTtsNative
 import com.exemplo.edgetts.protocol.EdgeTtsClient
 import com.exemplo.edgetts.protocol.EdgeVoice
 import org.json.JSONArray
+import java.io.ByteArrayOutputStream
 import java.util.Locale
 import java.util.UUID
 import java.util.concurrent.Executors
@@ -36,6 +37,11 @@ class EdgeTtsService : TextToSpeechService() {
 
         private const val MIN_CHUNK_CHARS_BEFORE_SPLIT = 140
         private const val TARGET_MAX_CHUNK_CHARS = 280
+
+        // Cache leve em memória para trechos repetidos (máx ~5 MB e até 32 entradas)
+        private const val MAX_CACHE_ENTRIES = 32
+        private const val MAX_CACHE_TOTAL_BYTES = 5 * 1024 * 1024
+        private const val MAX_CACHEABLE_TEXT_LEN = 320
     }
 
     private data class SpeechSegment(
@@ -43,8 +49,30 @@ class EdgeTtsService : TextToSpeechService() {
         val isDialogue: Boolean
     )
 
+    private data class CacheKey(
+        val voice: String,
+        val rate: String,
+        val pitch: String,
+        val text: String
+    )
+
     private val stopRequested = AtomicBoolean(false)
     private val prefetchExecutor = Executors.newSingleThreadExecutor()
+
+    private val cacheLock = Any()
+    private var cachedBytesTotal = 0
+    private val pcmCache = object : LinkedHashMap<CacheKey, ByteArray>(MAX_CACHE_ENTRIES, 0.75f, true) {
+        override fun removeEldestEntry(eldest: MutableMap.MutableEntry<CacheKey, ByteArray>?): Boolean {
+            val shouldEvict = size > MAX_CACHE_ENTRIES || (eldest != null && cachedBytesTotal > MAX_CACHE_TOTAL_BYTES)
+            if (shouldEvict && eldest != null) {
+                cachedBytesTotal = (cachedBytesTotal - eldest.value.size).coerceAtLeast(0)
+            }
+            return shouldEvict
+        }
+    }
+
+    @Volatile
+    private var lastDiagInMemory: String = ""
 
     @Volatile
     private var activeRequestId: String? = null
@@ -131,6 +159,37 @@ class EdgeTtsService : TextToSpeechService() {
         super.onDestroy()
     }
 
+    private fun getCachedPcm(key: CacheKey): ByteArray? {
+        if (key.text.length > MAX_CACHEABLE_TEXT_LEN) return null
+        synchronized(cacheLock) {
+            return pcmCache[key]
+        }
+    }
+
+    private fun putCachedPcm(key: CacheKey, data: ByteArray) {
+        if (data.isEmpty() || key.text.length > MAX_CACHEABLE_TEXT_LEN || data.size > MAX_CACHE_TOTAL_BYTES / 2) {
+            return
+        }
+        synchronized(cacheLock) {
+            val existing = pcmCache.remove(key)
+            if (existing != null) {
+                cachedBytesTotal = (cachedBytesTotal - existing.size).coerceAtLeast(0)
+            }
+            pcmCache[key] = data
+            cachedBytesTotal += data.size
+            while (cachedBytesTotal > MAX_CACHE_TOTAL_BYTES && pcmCache.size > 1) {
+                val iterator = pcmCache.entries.iterator()
+                if (iterator.hasNext()) {
+                    val eldest = iterator.next()
+                    cachedBytesTotal = (cachedBytesTotal - eldest.value.size).coerceAtLeast(0)
+                    iterator.remove()
+                } else {
+                    break
+                }
+            }
+        }
+    }
+
     override fun onSynthesizeText(request: SynthesisRequest?, callback: SynthesisCallback?) {
         if (request == null || callback == null) return
 
@@ -139,7 +198,7 @@ class EdgeTtsService : TextToSpeechService() {
 
         val text = request.charSequenceText?.toString()?.trim().orEmpty()
         if (text.isEmpty()) {
-            saveDiag("Texto vazio")
+            saveDiag("Texto vazio", persistNow = true)
             callback.done()
             return
         }
@@ -160,7 +219,7 @@ class EdgeTtsService : TextToSpeechService() {
         }
 
         if (segments.isEmpty()) {
-            saveDiag("Texto vazio")
+            saveDiag("Texto vazio", persistNow = true)
             callback.done()
             return
         }
@@ -203,55 +262,82 @@ class EdgeTtsService : TextToSpeechService() {
             return voice
         }
 
-        var currentVoice = resolveSegmentVoice(segments[0])
-        var currentReqId = UUID.randomUUID().toString()
-        activeRequestId = currentReqId
+        val firstVoice = resolveSegmentVoice(segments[0])
+        val firstCacheKey = CacheKey(firstVoice, rateStr, pitchStr, segments[0].text)
+        val firstCached = getCachedPcm(firstCacheKey)
 
-        val startErr = EdgeTtsNative.nativeBeginSynthesis(
-            requestId = currentReqId,
-            text = segments[0].text,
-            voice = currentVoice,
-            rate = rateStr,
-            volume = volumeStr,
-            pitch = pitchStr
-        )
-        if (!startErr.isNullOrBlank()) {
-            saveDiag("Erro início: $startErr")
-            callback.error()
-            return
+        var currentVoice = firstVoice
+        var currentReqId = UUID.randomUUID().toString()
+        var currentCachedPcm: ByteArray? = firstCached
+
+        if (currentCachedPcm == null) {
+            activeRequestId = currentReqId
+            val startErr = EdgeTtsNative.nativeBeginSynthesis(
+                requestId = currentReqId,
+                text = segments[0].text,
+                voice = currentVoice,
+                rate = rateStr,
+                volume = volumeStr,
+                pitch = pitchStr
+            )
+            if (!startErr.isNullOrBlank()) {
+                saveDiag("Erro início: $startErr", persistNow = true)
+                callback.error()
+                return
+            }
         }
 
         try {
             for (index in segments.indices) {
                 if (stopRequested.get()) break
 
+                val segText = segments[index].text
                 val reqId = currentReqId
                 val activeVoiceForChunk = currentVoice
-                activeRequestId = reqId
-                saveDiag("A sintetizar (${index + 1}/${segments.size}, $activeVoiceForChunk)...")
+                val cachedForThisChunk = currentCachedPcm
+
+                if (cachedForThisChunk == null) {
+                    activeRequestId = reqId
+                }
+
+                saveDiag(
+                    "A sintetizar (${index + 1}/${segments.size}, $activeVoiceForChunk)...",
+                    persistNow = (index == 0)
+                )
 
                 if (index + 1 < segments.size) {
                     val nextSeg = segments[index + 1]
                     val nextVoice = resolveSegmentVoice(nextSeg)
-                    val nextReqId = UUID.randomUUID().toString()
-                    prefetchedRequestId = nextReqId
-                    prefetchFuture = prefetchExecutor.submit {
-                        if (!stopRequested.get()) {
-                            EdgeTtsNative.nativeBeginSynthesis(
-                                requestId = nextReqId,
-                                text = nextSeg.text,
-                                voice = nextVoice,
-                                rate = rateStr,
-                                volume = volumeStr,
-                                pitch = pitchStr
-                            )
+                    val nextKey = CacheKey(nextVoice, rateStr, pitchStr, nextSeg.text)
+                    val nextCached = getCachedPcm(nextKey)
+
+                    if (nextCached != null) {
+                        prefetchedRequestId = null
+                        prefetchFuture = null
+                        currentCachedPcm = nextCached
+                    } else {
+                        currentCachedPcm = null
+                        val nextReqId = UUID.randomUUID().toString()
+                        prefetchedRequestId = nextReqId
+                        prefetchFuture = prefetchExecutor.submit {
+                            if (!stopRequested.get()) {
+                                EdgeTtsNative.nativeBeginSynthesis(
+                                    requestId = nextReqId,
+                                    text = nextSeg.text,
+                                    voice = nextVoice,
+                                    rate = rateStr,
+                                    volume = volumeStr,
+                                    pitch = pitchStr
+                                )
+                            }
                         }
+                        currentReqId = nextReqId
                     }
                     currentVoice = nextVoice
-                    currentReqId = nextReqId
                 } else {
                     prefetchedRequestId = null
                     prefetchFuture = null
+                    currentCachedPcm = null
                 }
 
                 if (!callbackStarted) {
@@ -262,37 +348,63 @@ class EdgeTtsService : TextToSpeechService() {
                 val chunkMax = callback.maxBufferSize.coerceAtLeast(8192)
                 var segmentBytes = 0
 
-                while (!stopRequested.get()) {
-                    val pcmChunk = EdgeTtsNative.nativeReadPcmChunk(reqId, chunkMax) ?: break
-                    if (pcmChunk.isEmpty()) continue
-                    segmentBytes += pcmChunk.size
-                    totalBytesAll += pcmChunk.size
-                    val status = callback.audioAvailable(pcmChunk, 0, pcmChunk.size)
-                    if (status != TextToSpeech.SUCCESS) {
-                        stopRequested.set(true)
-                        break
+                if (cachedForThisChunk != null) {
+                    var offset = 0
+                    while (offset < cachedForThisChunk.size && !stopRequested.get()) {
+                        val toWrite = (cachedForThisChunk.size - offset).coerceAtMost(chunkMax)
+                        segmentBytes += toWrite
+                        totalBytesAll += toWrite
+                        val status = callback.audioAvailable(cachedForThisChunk, offset, toWrite)
+                        if (status != TextToSpeech.SUCCESS) {
+                            stopRequested.set(true)
+                            break
+                        }
+                        offset += toWrite
                     }
-                }
+                } else {
+                    val shouldCache = segText.length <= MAX_CACHEABLE_TEXT_LEN
+                    val collector = if (shouldCache) ByteArrayOutputStream() else null
 
-                EdgeTtsNative.nativeStop(reqId)
+                    while (!stopRequested.get()) {
+                        val pcmChunk = EdgeTtsNative.nativeReadPcmChunk(reqId, chunkMax) ?: break
+                        if (pcmChunk.isEmpty()) continue
+                        segmentBytes += pcmChunk.size
+                        totalBytesAll += pcmChunk.size
+                        collector?.write(pcmChunk, 0, pcmChunk.size)
+                        val status = callback.audioAvailable(pcmChunk, 0, pcmChunk.size)
+                        if (status != TextToSpeech.SUCCESS) {
+                            stopRequested.set(true)
+                            break
+                        }
+                    }
 
-                val nativeErr = EdgeTtsNative.nativeGetLastError(reqId)
-                if (!nativeErr.isNullOrBlank() && segmentBytes == 0 && totalBytesAll == 0) {
-                    cancelPrefetch()
-                    saveDiag("Erro: $nativeErr")
-                    callback.error()
-                    return
+                    EdgeTtsNative.nativeStop(reqId)
+
+                    val nativeErr = EdgeTtsNative.nativeGetLastError(reqId)
+                    if (!nativeErr.isNullOrBlank() && segmentBytes == 0 && totalBytesAll == 0) {
+                        cancelPrefetch()
+                        saveDiag("Erro: $nativeErr", persistNow = true)
+                        callback.error()
+                        return
+                    }
+
+                    if (nativeErr.isNullOrBlank() && collector != null && collector.size() > 0 && !stopRequested.get()) {
+                        putCachedPcm(
+                            CacheKey(activeVoiceForChunk, rateStr, pitchStr, segText),
+                            collector.toByteArray()
+                        )
+                    }
                 }
             }
 
             if (!callbackStarted) {
                 callback.start(SAMPLE_RATE_HZ, AudioFormat.ENCODING_PCM_16BIT, 1)
             }
-            saveDiag("OK ($totalBytesAll bytes PCM)")
+            saveDiag("OK ($totalBytesAll bytes PCM)", persistNow = true)
             callback.done()
         } catch (e: Exception) {
             cancelPrefetch()
-            saveDiag("Erro: ${e.message ?: e.javaClass.simpleName}")
+            saveDiag("Erro: ${e.message ?: e.javaClass.simpleName}", persistNow = true)
             try {
                 callback.error()
             } catch (_: Exception) {
@@ -487,11 +599,14 @@ class EdgeTtsService : TextToSpeechService() {
         return if (result.isEmpty()) listOf(normalized) else result
     }
 
-    private fun saveDiag(message: String) {
-        getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
-            .edit()
-            .putString(KEY_LAST_DIAG, message)
-            .apply()
+    private fun saveDiag(message: String, persistNow: Boolean = false) {
+        lastDiagInMemory = message
+        if (persistNow) {
+            getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+                .edit()
+                .putString(KEY_LAST_DIAG, message)
+                .apply()
+        }
     }
 
     private fun resolveVoiceForRequest(request: SynthesisRequest, configuredVoice: String): String {
