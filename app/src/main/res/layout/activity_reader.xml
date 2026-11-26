@@ -2,145 +2,75 @@
 <ScrollView xmlns:android="http://schemas.android.com/apk/res/android"
     android:layout_width="match_parent"
     android:layout_height="match_parent"
-    android:background="@color/glow_bg_dark"
     android:fillViewport="true">
 
     <LinearLayout
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
         android:orientation="vertical"
-        android:padding="20dp">
+        android:padding="16dp">
 
         <LinearLayout
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:background="@drawable/bg_glow_card"
-            android:orientation="vertical"
-            android:padding="18dp">
+            android:orientation="horizontal"
+            android:gravity="top">
 
-            <TextView
-                android:layout_width="wrap_content"
-                android:layout_height="wrap_content"
-                android:text="Leitor de TXT e Links"
-                android:textColor="@color/glow_text_primary"
-                android:textSize="20sp"
-                android:textStyle="bold" />
+            <FrameLayout
+                android:layout_width="96dp"
+                android:layout_height="136dp"
+                android:background="#222222">
 
-            <TextView
-                android:id="@+id/tvReaderStatus"
-                android:layout_width="wrap_content"
-                android:layout_height="wrap_content"
-                android:layout_marginTop="6dp"
-                android:text="Status: pronto"
-                android:textColor="@color/glow_cyan"
-                android:textSize="13sp" />
-        </LinearLayout>
+                <ImageView
+                    android:id="@+id/ivBookCover"
+                    android:layout_width="match_parent"
+                    android:layout_height="match_parent"
+                    android:contentDescription="Capa do livro"
+                    android:scaleType="centerCrop" />
 
-        <LinearLayout
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:layout_marginTop="16dp"
-            android:background="@drawable/bg_glow_card"
-            android:orientation="vertical"
-            android:padding="18dp">
-
-            <TextView
-                android:layout_width="wrap_content"
-                android:layout_height="wrap_content"
-                android:text="Importar de link"
-                android:textColor="@color/glow_text_primary"
-                android:textSize="15sp"
-                android:textStyle="bold" />
-
-            <EditText
-                android:id="@+id/etUrlInput"
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:layout_marginTop="8dp"
-                android:background="@color/glow_surface_elevated"
-                android:hint="https://exemplo.com/artigo"
-                android:inputType="textUri"
-                android:padding="12dp"
-                android:textColor="@color/glow_text_primary"
-                android:textColorHint="@color/glow_text_secondary"
-                android:textSize="14sp" />
+                <TextView
+                    android:id="@+id/tvCoverFallback"
+                    android:layout_width="match_parent"
+                    android:layout_height="match_parent"
+                    android:gravity="center"
+                    android:padding="8dp"
+                    android:text="TXT"
+                    android:textColor="#FFFFFF"
+                    android:textSize="14sp"
+                    android:textStyle="bold" />
+            </FrameLayout>
 
             <LinearLayout
-                android:layout_width="match_parent"
+                android:layout_width="0dp"
                 android:layout_height="wrap_content"
-                android:layout_marginTop="12dp"
-                android:orientation="horizontal">
+                android:layout_marginStart="12dp"
+                android:layout_weight="1"
+                android:orientation="vertical">
 
-                <androidx.appcompat.widget.AppCompatButton
-                    android:id="@+id/btnLoadUrl"
-                    android:layout_width="0dp"
+                <TextView
+                    android:id="@+id/tvBookTitle"
+                    android:layout_width="match_parent"
                     android:layout_height="wrap_content"
-                    android:layout_weight="1"
-                    android:background="@color/glow_surface_elevated"
-                    android:gravity="center"
-                    android:maxLines="2"
-                    android:minHeight="48dp"
-                    android:paddingHorizontal="8dp"
-                    android:paddingVertical="10dp"
-                    android:text="Importar link"
-                    android:textColor="@color/glow_cyan"
-                    android:textSize="13sp"
+                    android:maxLines="3"
+                    android:ellipsize="end"
+                    android:text="Nenhum livro carregado"
+                    android:textSize="18sp"
                     android:textStyle="bold" />
 
-                <androidx.appcompat.widget.AppCompatButton
-                    android:id="@+id/btnPickTxt"
-                    android:layout_width="0dp"
+                <TextView
+                    android:id="@+id/tvBookAuthor"
+                    android:layout_width="match_parent"
                     android:layout_height="wrap_content"
-                    android:layout_marginStart="10dp"
-                    android:layout_weight="1"
-                    android:background="@color/glow_surface_elevated"
-                    android:gravity="center"
-                    android:maxLines="2"
-                    android:minHeight="48dp"
-                    android:paddingHorizontal="8dp"
-                    android:paddingVertical="10dp"
-                    android:text="Abrir TXT"
-                    android:textColor="@color/glow_pink"
-                    android:textSize="13sp"
-                    android:textStyle="bold" />
-            </LinearLayout>
+                    android:layout_marginTop="4dp"
+                    android:text="Autor não informado"
+                    android:textSize="14sp" />
 
-            <LinearLayout
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:layout_marginTop="10dp"
-                android:orientation="horizontal">
-
-                <androidx.appcompat.widget.AppCompatButton
-                    android:id="@+id/btnPlayReader"
-                    android:layout_width="0dp"
+                <TextView
+                    android:id="@+id/tvChapterInfo"
+                    android:layout_width="match_parent"
                     android:layout_height="wrap_content"
-                    android:layout_weight="1"
-                    android:background="@drawable/bg_glow_button"
-                    android:gravity="center"
-                    android:maxLines="2"
-                    android:minHeight="48dp"
-                    android:paddingHorizontal="8dp"
-                    android:paddingVertical="10dp"
-                    android:text="Ouvir"
-                    android:textColor="@color/glow_text_on_accent"
-                    android:textSize="13sp"
-                    android:textStyle="bold" />
-
-                <androidx.appcompat.widget.AppCompatButton
-                    android:id="@+id/btnStopReader"
-                    android:layout_width="0dp"
-                    android:layout_height="wrap_content"
-                    android:layout_marginStart="10dp"
-                    android:layout_weight="1"
-                    android:background="@color/glow_surface_elevated"
-                    android:gravity="center"
-                    android:maxLines="2"
-                    android:minHeight="48dp"
-                    android:paddingHorizontal="8dp"
-                    android:paddingVertical="10dp"
-                    android:text="Parar"
-                    android:textColor="@color/glow_text_primary"
+                    android:layout_marginTop="8dp"
+                    android:text="Capítulo 0/0"
                     android:textSize="13sp"
                     android:textStyle="bold" />
             </LinearLayout>
@@ -149,28 +79,100 @@
         <LinearLayout
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:layout_marginTop="16dp"
-            android:background="@drawable/bg_glow_card"
-            android:orientation="vertical"
-            android:padding="18dp">
+            android:layout_marginTop="12dp"
+            android:orientation="horizontal">
 
-            <TextView
-                android:layout_width="wrap_content"
+            <Button
+                android:id="@+id/btnSelectTxt"
+                android:layout_width="0dp"
                 android:layout_height="wrap_content"
-                android:text="Conteúdo carregado"
-                android:textColor="@color/glow_text_primary"
-                android:textSize="15sp"
-                android:textStyle="bold" />
+                android:layout_weight="1"
+                android:text="Abrir TXT" />
 
-            <TextView
-                android:id="@+id/tvReaderContent"
-                android:layout_width="match_parent"
+            <Button
+                android:id="@+id/btnSelectChapters"
+                android:layout_width="0dp"
                 android:layout_height="wrap_content"
-                android:layout_marginTop="10dp"
-                android:textColor="@color/glow_text_secondary"
-                android:textIsSelectable="true"
-                android:textSize="14sp" />
+                android:layout_marginStart="8dp"
+                android:layout_weight="1"
+                android:enabled="false"
+                android:text="Capítulos" />
         </LinearLayout>
+
+        <EditText
+            android:id="@+id/etWebUrl"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="8dp"
+            android:hint="Cole o link da página (ex.: https://...)"
+            android:inputType="textUri"
+            android:singleLine="true" />
+
+        <Button
+            android:id="@+id/btnLoadUrl"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="6dp"
+            android:text="Carregar link como livro" />
+
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="10dp"
+            android:orientation="horizontal">
+
+            <Button
+                android:id="@+id/btnPrevChapter"
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:enabled="false"
+                android:text="Cap. anterior" />
+
+            <Button
+                android:id="@+id/btnPlayReader"
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_marginStart="8dp"
+                android:layout_weight="1"
+                android:enabled="false"
+                android:text="Ouvir capítulo" />
+
+            <Button
+                android:id="@+id/btnStopReader"
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_marginStart="8dp"
+                android:layout_weight="1"
+                android:enabled="false"
+                android:text="Parar" />
+
+            <Button
+                android:id="@+id/btnNextChapter"
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_marginStart="8dp"
+                android:layout_weight="1"
+                android:enabled="false"
+                android:text="Próx. cap." />
+        </LinearLayout>
+
+        <TextView
+            android:id="@+id/tvReaderStatus"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="10dp"
+            android:text="Pronto para abrir um TXT ou link."
+            android:textSize="13sp" />
+
+        <TextView
+            android:id="@+id/tvReaderContent"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="10dp"
+            android:text=""
+            android:textIsSelectable="true"
+            android:textSize="15sp" />
 
     </LinearLayout>
 </ScrollView>
