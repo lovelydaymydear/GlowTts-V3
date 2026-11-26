@@ -7,8 +7,31 @@ import java.io.InputStreamReader
 import java.net.HttpURLConnection
 import java.net.URL
 import java.nio.charset.Charset
+import java.util.Locale
 
 object ReaderContentLoader {
+
+    private val noiseBlockTags = listOf(
+        "script", "style", "noscript", "svg", "canvas", "iframe",
+        "header", "footer", "nav", "aside", "form"
+    )
+
+    private val cookieAndChromePhrases = listOf(
+        "cookie", "cookies", "política de privacidade", "politica de privacidade",
+        "termos de uso", "termos e condições", "termos e condicoes",
+        "gerenciar consentimento", "preferências de cookies", "preferencias de cookies",
+        "aceitar todos", "rejeitar todos", "configurações de cookies", "configuracoes de cookies",
+        "todos os direitos reservados", "all rights reserved",
+        "assinar newsletter", "newsletter", "inscreva-se", "cadastre-se",
+        "compartilhar no", "seguir no", "pular para o conteúdo", "pular para o conteudo"
+    )
+
+    private val standaloneUiLabels = setOf(
+        "menu", "fechar", "entrar", "login", "sair", "buscar", "pesquisar",
+        "compartilhar", "comentar", "comentários", "comentarios",
+        "próximo", "proximo", "anterior", "voltar", "topo", "início", "inicio",
+        "publicidade", "anúncio", "anuncio", "patrocinado", "ler mais"
+    )
 
     fun loadTextFromUri(context: Context, uri: Uri): Result<String> {
         return try {
@@ -83,28 +106,112 @@ object ReaderContentLoader {
 
     private fun htmlToText(raw: String): String {
         if (!raw.contains("<")) {
-            return raw.replace("\r\n", "\n").replace(Regex("[ \\t]+"), " ").trim()
+            return cleanPlainLines(raw)
         }
 
-        val withoutScripts = raw
-            .replace(Regex("(?is)<script[^>]*>.*?</script>"), " ")
-            .replace(Regex("(?is)<style[^>]*>.*?</style>"), " ")
-            .replace(Regex("(?is)<noscript[^>]*>.*?</noscript>"), " ")
+        val focusHtml = extractMainFocusHtml(raw)
+        var processed = focusHtml
+
+        for (tag in noiseBlockTags) {
+            processed = processed.replace(
+                Regex("(?is)<$tag\\b[^>]*>.*?</$tag\\s*>"),
+                " "
+            )
+        }
+
+        // Remove elementos com id/class típicos de banner de cookies ou rodapé/menu
+        processed = processed.replace(
+            Regex("(?is)<(div|section|aside|footer|header)\\b[^>]*(id|class)\\s*=\\s*[\"'][^\"']*(cookie|consent|gdpr|banner|modal|popup|sidebar|nav|menu|footer|header|promo|ad-)[^\"']*[\"'][^>]*>.*?</\\1\\s*>"),
+            " "
+        )
+
+        processed = processed
             .replace(Regex("(?i)<br\\s*/?>"), "\n")
             .replace(Regex("(?i)</(p|div|h[1-6]|li|tr|article|section|blockquote)>"), "\n\n")
             .replace(Regex("<[^>]+>"), " ")
 
-        return decodeEntities(withoutScripts)
+        val decoded = decodeEntities(processed)
+        return cleanPlainLines(decoded)
+    }
+
+    private fun extractMainFocusHtml(html: String): String {
+        val articleMatch = Regex("(?is)<article\\b[^>]*>(.*?)</article\\s*>").find(html)
+        if (articleMatch != null) {
+            val candidate = articleMatch.groupValues[1]
+            if (candidate.replace(Regex("<[^>]+>"), " ").trim().length >= 300) {
+                return candidate
+            }
+        }
+
+        val mainMatch = Regex("(?is)<main\\b[^>]*>(.*?)</main\\s*>").find(html)
+        if (mainMatch != null) {
+            val candidate = mainMatch.groupValues[1]
+            if (candidate.replace(Regex("<[^>]+>"), " ").trim().length >= 300) {
+                return candidate
+            }
+        }
+
+        return html
+    }
+
+    private fun cleanPlainLines(raw: String): String {
+        val normalized = raw
             .replace("\r\n", "\n")
-            .replace(Regex("[ \\t]+"), " ")
-            .replace(Regex(" ?\n ?"), "\n")
+            .replace("\r", "\n")
+
+        val lines = normalized.split("\n")
+        val keptLines = ArrayList<String>(lines.size)
+
+        for (rawLine in lines) {
+            val line = rawLine.replace(Regex("[ \\t]+"), " ").trim()
+            if (line.isEmpty()) {
+                if (keptLines.isNotEmpty() && keptLines.last().isNotEmpty()) {
+                    keptLines.add("")
+                }
+                continue
+            }
+
+            if (isNoiseLine(line)) {
+                continue
+            }
+
+            keptLines.add(line)
+        }
+
+        return keptLines
+            .joinToString("\n")
             .replace(Regex("\n{3,}"), "\n\n")
             .trim()
+    }
+
+    private fun isNoiseLine(line: String): Boolean {
+        val lower = line.lowercase(Locale.ROOT).trim()
+        val normalizedPunct = lower.replace(Regex("[.:!?•|»«—–-]+$"), "").trim()
+
+        if (normalizedPunct in standaloneUiLabels) {
+            return true
+        }
+
+        // Linhas curtas ou médias que contêm termos de cookies / privacidade / navegação
+        if (line.length <= 160 && cookieAndChromePhrases.any { lower.contains(it) }) {
+            return true
+        }
+
+        // Linhas muito curtas sem pontuação final que parecem itens soltos de menu
+        if (line.length <= 24 && !line.endsWith(".") && !line.endsWith("!") && !line.endsWith("?")) {
+            val wordCount = line.split(Regex("\\s+")).size
+            if (wordCount <= 2 && lower.none { it.isDigit() }) {
+                return true
+            }
+        }
+
+        return false
     }
 
     private fun decodeEntities(input: String): String {
         return input
             .replace("&nbsp;", " ")
+            .replace("&#160;", " ")
             .replace("&amp;", "&")
             .replace("&lt;", "<")
             .replace("&gt;", ">")
@@ -113,5 +220,8 @@ object ReaderContentLoader {
             .replace("&apos;", "'")
             .replace("&mdash;", "—")
             .replace("&ndash;", "–")
+            .replace("&laquo;", "«")
+            .replace("&raquo;", "»")
+            .replace("&hellip;", "…")
     }
 }
