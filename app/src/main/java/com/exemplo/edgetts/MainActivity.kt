@@ -8,6 +8,7 @@ import android.speech.tts.TextToSpeech
 import android.speech.tts.UtteranceProgressListener
 import androidx.appcompat.app.AppCompatActivity
 import com.exemplo.edgetts.databinding.ActivityMainBinding
+import com.exemplo.edgetts.reader.ReaderActivity
 
 class MainActivity : AppCompatActivity() {
 
@@ -69,6 +70,10 @@ class MainActivity : AppCompatActivity() {
 
         binding.btnVoiceSettings.setOnClickListener {
             startActivity(Intent(this, SettingsActivity::class.java))
+        }
+
+        binding.btnOpenReader.setOnClickListener {
+            startActivity(Intent(this, ReaderActivity::class.java))
         }
 
         binding.btnOpenTtsSettings.setOnClickListener {
