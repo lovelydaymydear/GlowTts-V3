@@ -26,6 +26,11 @@
             android:exported="true"
             android:label="Configurações do GlowTTS" />
 
+        <activity
+            android:name=".reader.ReaderActivity"
+            android:exported="false"
+            android:label="Leitor do GlowTTS" />
+
         <service
             android:name=".tts.EdgeTtsService"
             android:exported="true"
